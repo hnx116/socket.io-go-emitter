@@ -13,6 +13,7 @@ const (
 	binaryEvent        = 5
 	redisPoolMaxIdle   = 80
 	redisPoolMaxActive = 12000 // max number of connections
+	uid                = "emitter"
 )
 
 // Options ...
@@ -38,9 +39,9 @@ func New(opts Options) Emitter {
 	initRedisConnPool(&emitter, opts)
 
 	if opts.Key != "" {
-		emitter._key = fmt.Sprintf("%s#emitter", opts.Key)
+		emitter._key = fmt.Sprintf("%s", opts.Key)
 	} else {
-		emitter._key = "socket.io#emitter"
+		emitter._key = "socket.io"
 	}
 
 	emitter._rooms = make(map[string]bool)
@@ -103,11 +104,21 @@ func (emitter Emitter) Emit(args ...interface{}) bool {
 
 	//TODO: Goroutines
 	//Pack & Publish
-	b, err := msgpack.Marshal([]interface{}{packet, extras})
+
+	chn := emitter._key + "#" + packet["nsp"].(string) + "#"
+
+	b, err := msgpack.Marshal([]interface{}{uid, packet, extras})
 	if err != nil {
 		panic(err)
 	} else {
-		publish(emitter, emitter._key, b)
+		if ok := len(extras["rooms"].([]string)); ok > 0 {
+			for _, room := range extras["rooms"].([]string) {
+				chnRoom := chn + room + "#"
+				publish(emitter, chnRoom, b)
+			}
+		} else {
+			publish(emitter, chn, b)
+		}
 	}
 
 	emitter._rooms = make(map[string]bool)
