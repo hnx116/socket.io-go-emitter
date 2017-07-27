@@ -18,9 +18,10 @@ const (
 
 // Options ...
 type Options struct {
-	Host     string
-	Password string
-	Key      string
+	Host      string
+	Password  string
+	Key       string
+	RedisPool *redis.Pool
 }
 
 //Emitter ... Socket.io Emitter
@@ -33,48 +34,56 @@ type Emitter struct {
 }
 
 // New ... Creates new Emitter using options
-func New(opts Options) Emitter {
-	emitter := Emitter{_opts: opts}
+func New(opts Options) *Emitter {
+	e := Emitter{_opts: opts}
 
-	initRedisConnPool(&emitter, opts)
-
-	if opts.Key != "" {
-		emitter._key = fmt.Sprintf("%s", opts.Key)
+	if opts.RedisPool != nil {
+		e._pool = opts.RedisPool
 	} else {
-		emitter._key = "socket.io"
+		if opts.Host == "" {
+			panic("Missing redis `host`")
+		}
+
+		e._pool = newPool(opts)
 	}
 
-	emitter._rooms = make(map[string]bool)
-	emitter._flags = make(map[string]string)
+	if opts.Key != "" {
+		e._key = fmt.Sprintf("%s", opts.Key)
+	} else {
+		e._key = "socket.io"
+	}
 
-	return emitter
+	e._rooms = make(map[string]bool)
+	e._flags = make(map[string]string)
+
+	return &e
 }
 
 // In ... Limit emission to a certain `room`.`
-func (emitter Emitter) In(room string) Emitter {
-	if _, ok := emitter._rooms[room]; ok == false {
-		emitter._rooms[room] = true
+func (e *Emitter) In(room string) *Emitter {
+	if _, ok := e._rooms[room]; ok == false {
+		e._rooms[room] = true
 	}
-	return emitter
+	return e
 }
 
 // To ... Limit emission to a certain `room`.
-func (emitter Emitter) To(room string) Emitter {
-	return emitter.In(room)
+func (e *Emitter) To(room string) *Emitter {
+	return e.In(room)
 }
 
 // Of ... To Limit emission to certain `namespace`.
-func (emitter Emitter) Of(nsp string) Emitter {
-	emitter._flags["nsp"] = nsp
-	return emitter
+func (e *Emitter) Of(nsp string) *Emitter {
+	e._flags["nsp"] = nsp
+	return e
 }
 
 // Emit ... Send the packet.
-func (emitter Emitter) Emit(args ...interface{}) bool {
+func (e *Emitter) Emit(args ...interface{}) bool {
 	packet := make(map[string]interface{})
 	extras := make(map[string]interface{})
 
-	if ok := emitter.hasBin(args); ok {
+	if ok := e.hasBin(args); ok {
 		packet["type"] = binaryEvent
 	} else {
 		packet["type"] = event
@@ -82,33 +91,31 @@ func (emitter Emitter) Emit(args ...interface{}) bool {
 
 	packet["data"] = args
 
-	if value, ok := emitter._flags["nsp"]; ok {
+	if value, ok := e._flags["nsp"]; ok {
 		packet["nsp"] = value
-		delete(emitter._flags, "nsp")
+		delete(e._flags, "nsp")
 	} else {
 		packet["nsp"] = "/"
 	}
 
-	if ok := len(emitter._rooms); ok > 0 {
+	if ok := len(e._rooms); ok > 0 {
 		//TODO:Cast??
-		extras["rooms"] = getKeys(emitter._rooms)
+		extras["rooms"] = getKeys(e._rooms)
 	} else {
 		extras["rooms"] = make([]string, 0, 0)
 	}
 
-	if ok := len(emitter._flags); ok > 0 {
-		extras["flags"] = emitter._flags
+	if ok := len(e._flags); ok > 0 {
+		extras["flags"] = e._flags
 	} else {
 		extras["flags"] = make(map[string]string)
 	}
 
-	emitter._rooms = make(map[string]bool)
-	emitter._flags = make(map[string]string)
+	e._rooms = make(map[string]bool)
+	e._flags = make(map[string]string)
 
-	//TODO: Goroutines
 	//Pack & Publish
-
-	chn := emitter._key + "#" + packet["nsp"].(string) + "#"
+	chn := e._key + "#" + packet["nsp"].(string) + "#"
 
 	b, err := msgpack.Marshal([]interface{}{uid, packet, extras})
 	if err != nil {
@@ -117,27 +124,19 @@ func (emitter Emitter) Emit(args ...interface{}) bool {
 		if ok := len(extras["rooms"].([]string)); ok > 0 {
 			for _, room := range extras["rooms"].([]string) {
 				chnRoom := chn + room + "#"
-				publish(emitter, chnRoom, b)
+				publish(e, chnRoom, b)
 			}
 		} else {
-			publish(emitter, chn, b)
+			publish(e, chn, b)
 		}
 	}
 
 	return true
 }
 
-func (emitter Emitter) hasBin(args ...interface{}) bool {
+func (e *Emitter) hasBin(args ...interface{}) bool {
 	//NOT implemented yet!
 	return true
-}
-
-func initRedisConnPool(emitter *Emitter, opts Options) {
-	if opts.Host == "" {
-		panic("Missing redis `host`")
-	}
-
-	emitter._pool = newPool(opts)
 }
 
 func newPool(opts Options) *redis.Pool {
@@ -165,14 +164,12 @@ func newPool(opts Options) *redis.Pool {
 			return err
 		},
 	}
-
 }
 
-func publish(emitter Emitter, channel string, value interface{}) {
-	c := emitter._pool.Get()
+func publish(e *Emitter, channel string, value interface{}) {
+	c := e._pool.Get()
 	defer c.Close()
 	c.Do("PUBLISH", channel, value)
-
 }
 
 func getKeys(m map[string]bool) []string {
@@ -186,9 +183,8 @@ func getKeys(m map[string]bool) []string {
 }
 
 // Print emitter details
-func dump(emitter Emitter, args ...interface{}) {
-	fmt.Println("Emit params : ", args)
-	fmt.Println("Emitter key: ", emitter._key)
-	fmt.Println("Emitter flags: ", emitter._flags)
-	fmt.Println("Emitter rooms: ", emitter._rooms)
+func Dump(e *Emitter) {
+	fmt.Println("Emitter key:", e._key)
+	fmt.Println("Emitter flags:", e._flags)
+	fmt.Println("Emitter rooms:", e._rooms)
 }
