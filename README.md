@@ -33,7 +33,7 @@ import "github.com/hnx116/socket.io-go-emitter/emitter"
 
 //....
 
-opts := emitter.EmitterOptions{
+opts := emitter.Options{
 	Host: "127.0.0.1:6379",
 	Key   :"socket.io",
 }
