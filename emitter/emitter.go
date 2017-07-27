@@ -102,6 +102,9 @@ func (emitter Emitter) Emit(args ...interface{}) bool {
 		extras["flags"] = make(map[string]string)
 	}
 
+	emitter._rooms = make(map[string]bool)
+	emitter._flags = make(map[string]string)
+
 	//TODO: Goroutines
 	//Pack & Publish
 
@@ -120,9 +123,6 @@ func (emitter Emitter) Emit(args ...interface{}) bool {
 			publish(emitter, chn, b)
 		}
 	}
-
-	emitter._rooms = make(map[string]bool)
-	emitter._flags = make(map[string]string)
 
 	return true
 }
