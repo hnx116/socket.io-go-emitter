@@ -80,6 +80,18 @@ func (e *Emitter) Of(nsp string) *Emitter {
 
 // Emit ... Send the packet.
 func (e *Emitter) Emit(args ...interface{}) bool {
+	rooms := []string{}
+
+	if ok := len(e._rooms); ok > 0 {
+		rooms = getKeys(e._rooms)
+	}
+
+	e._rooms = make(map[string]bool)
+
+	return e.EmitTo(rooms, args...)
+}
+
+func (e *Emitter) EmitTo(rooms []string, args ...interface{}) bool {
 	packet := make(map[string]interface{})
 	extras := make(map[string]interface{})
 
@@ -98,12 +110,7 @@ func (e *Emitter) Emit(args ...interface{}) bool {
 		packet["nsp"] = "/"
 	}
 
-	if ok := len(e._rooms); ok > 0 {
-		//TODO:Cast??
-		extras["rooms"] = getKeys(e._rooms)
-	} else {
-		extras["rooms"] = make([]string, 0, 0)
-	}
+	extras["rooms"] = rooms
 
 	if ok := len(e._flags); ok > 0 {
 		extras["flags"] = e._flags
@@ -111,7 +118,6 @@ func (e *Emitter) Emit(args ...interface{}) bool {
 		extras["flags"] = make(map[string]string)
 	}
 
-	e._rooms = make(map[string]bool)
 	e._flags = make(map[string]string)
 
 	//Pack & Publish
