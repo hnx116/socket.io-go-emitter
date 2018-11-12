@@ -8,7 +8,7 @@
 //		import (
 //			"fmt"
 //
-//			"github.com/ziyasal/socket.io-go-emitter/emitter"
+//			"github.com/hnx116/socket.io-go-emitter/emitter"
 //		)
 //
 //		func main() {

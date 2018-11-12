@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/garyburd/redigo/redis"
-	"gopkg.in/vmihailenco/msgpack.v1"
+	"github.com/gomodule/redigo/redis"
+	msgpack "gopkg.in/vmihailenco/msgpack.v1"
 )
 
 const (
@@ -24,45 +24,43 @@ type Options struct {
 	RedisPool *redis.Pool
 }
 
-//Emitter ... Socket.io Emitter
+// Emitter ... Socket.io Emitter
 type Emitter struct {
-	_opts  Options
-	_key   string
-	_flags map[string]string
-	_rooms map[string]bool
-	_pool  *redis.Pool
+	opts  Options
+	key   string
+	flags map[string]string
+	rooms map[string]bool
+	pool  *redis.Pool
 }
 
 // New ... Creates new Emitter using options
 func New(opts Options) *Emitter {
-	e := Emitter{_opts: opts}
+	e := Emitter{opts: opts}
 
 	if opts.RedisPool != nil {
-		e._pool = opts.RedisPool
+		e.pool = opts.RedisPool
 	} else {
 		if opts.Host == "" {
 			panic("Missing redis `host`")
 		}
-
-		e._pool = newPool(opts)
+		e.pool = newPool(opts)
 	}
 
+	e.key = "socket.io"
 	if opts.Key != "" {
-		e._key = fmt.Sprintf("%s", opts.Key)
-	} else {
-		e._key = "socket.io"
+		e.key = fmt.Sprintf("%s", opts.Key)
 	}
 
-	e._rooms = make(map[string]bool)
-	e._flags = make(map[string]string)
+	e.rooms = make(map[string]bool)
+	e.flags = make(map[string]string)
 
 	return &e
 }
 
 // In ... Limit emission to a certain `room`.`
 func (e *Emitter) In(room string) *Emitter {
-	if _, ok := e._rooms[room]; ok == false {
-		e._rooms[room] = true
+	if _, ok := e.rooms[room]; !ok {
+		e.rooms[room] = true
 	}
 	return e
 }
@@ -74,20 +72,17 @@ func (e *Emitter) To(room string) *Emitter {
 
 // Of ... To Limit emission to certain `namespace`.
 func (e *Emitter) Of(nsp string) *Emitter {
-	e._flags["nsp"] = nsp
+	e.flags["nsp"] = nsp
 	return e
 }
 
 // Emit ... Send the packet.
 func (e *Emitter) Emit(args ...interface{}) bool {
 	rooms := []string{}
-
-	if ok := len(e._rooms); ok > 0 {
-		rooms = getKeys(e._rooms)
+	if len(e.rooms) > 0 {
+		rooms = getKeys(e.rooms)
 	}
-
-	e._rooms = make(map[string]bool)
-
+	e.rooms = make(map[string]bool)
 	return e.EmitTo(rooms, args...)
 }
 
@@ -95,53 +90,48 @@ func (e *Emitter) EmitTo(rooms []string, args ...interface{}) bool {
 	packet := make(map[string]interface{})
 	extras := make(map[string]interface{})
 
-	if ok := e.hasBin(args); ok {
+	packet["type"] = event
+	if e.hasBin(args) {
 		packet["type"] = binaryEvent
-	} else {
-		packet["type"] = event
 	}
 
 	packet["data"] = args
-
-	if value, ok := e._flags["nsp"]; ok {
-		packet["nsp"] = value
-		delete(e._flags, "nsp")
-	} else {
-		packet["nsp"] = "/"
+	packet["nsp"] = "/"
+	if nsp, ok := e.flags["nsp"]; ok {
+		packet["nsp"] = nsp
+		delete(e.flags, "nsp")
 	}
 
 	extras["rooms"] = rooms
-
-	if ok := len(e._flags); ok > 0 {
-		extras["flags"] = e._flags
-	} else {
-		extras["flags"] = make(map[string]string)
+	extras["flags"] = make(map[string]string)
+	if len(e.flags) > 0 {
+		extras["flags"] = e.flags
 	}
 
-	e._flags = make(map[string]string)
+	e.flags = make(map[string]string)
 
-	//Pack & Publish
-	chn := e._key + "#" + packet["nsp"].(string) + "#"
-
+	// Pack & Publish
 	b, err := msgpack.Marshal([]interface{}{uid, packet, extras})
 	if err != nil {
 		panic(err)
-	} else {
-		if ok := len(extras["rooms"].([]string)); ok > 0 {
-			for _, room := range extras["rooms"].([]string) {
-				chnRoom := chn + room + "#"
-				publish(e, chnRoom, b)
-			}
-		} else {
-			publish(e, chn, b)
-		}
 	}
 
+	ch := e.key + "#" + packet["nsp"].(string) + "#"
+
+	if len(extras["rooms"].([]string)) < 1 {
+		publish(e, ch, b)
+		return true
+	}
+
+	for _, room := range extras["rooms"].([]string) {
+		chRoom := ch + room + "#"
+		publish(e, chRoom, b)
+	}
 	return true
 }
 
 func (e *Emitter) hasBin(args ...interface{}) bool {
-	//NOT implemented yet!
+	// NOT implemented yet!
 	return true
 }
 
@@ -154,7 +144,6 @@ func newPool(opts Options) *redis.Pool {
 			if err != nil {
 				return nil, err
 			}
-
 			if opts.Password != "" {
 				if _, err := c.Do("AUTH", opts.Password); err != nil {
 					c.Close()
@@ -162,7 +151,6 @@ func newPool(opts Options) *redis.Pool {
 				}
 				return c, err
 			}
-
 			return c, err
 		},
 		TestOnBorrow: func(c redis.Conn, t time.Time) error {
@@ -173,24 +161,22 @@ func newPool(opts Options) *redis.Pool {
 }
 
 func publish(e *Emitter, channel string, value interface{}) {
-	c := e._pool.Get()
+	c := e.pool.Get()
 	defer c.Close()
 	c.Do("PUBLISH", channel, value)
 }
 
 func getKeys(m map[string]bool) []string {
 	keys := make([]string, 0, len(m))
-
 	for key := range m {
 		keys = append(keys, key)
 	}
-
 	return keys
 }
 
-// Print emitter details
+// Dump ... Print emitter details
 func Dump(e *Emitter) {
-	fmt.Println("Emitter key:", e._key)
-	fmt.Println("Emitter flags:", e._flags)
-	fmt.Println("Emitter rooms:", e._rooms)
+	fmt.Println("Emitter key:", e.key)
+	fmt.Println("Emitter flags:", e.flags)
+	fmt.Println("Emitter rooms:", e.rooms)
 }
